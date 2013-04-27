@@ -23,11 +23,36 @@ TinCan client library
 (function () {
     "use strict";
 
+    //
+    // this represents the full set of verb values that were
+    // allowed by the .9 spec version, if an object is created with one of
+    // the short forms it will be upconverted to the matching long form,
+    // for local storage and use and if an object is needed in .9 version
+    // consequently down converted
+    //
+    // hopefully this list will never grow (or change) and only the exact
+    // ADL compatible URLs should be matched
+    //
+    var _downConvertMap = {
+        "http://adlnet.gov/expapi/verbs/experienced": "experienced",
+        "http://adlnet.gov/expapi/verbs/attended":    "attended",
+        "http://adlnet.gov/expapi/verbs/attempted":   "attempted",
+        "http://adlnet.gov/expapi/verbs/completed":   "completed",
+        "http://adlnet.gov/expapi/verbs/passed":      "passed",
+        "http://adlnet.gov/expapi/verbs/failed":      "failed",
+        "http://adlnet.gov/expapi/verbs/answered":    "answered",
+        "http://adlnet.gov/expapi/verbs/interacted":  "interacted",
+        "http://adlnet.gov/expapi/verbs/imported":    "imported",
+        "http://adlnet.gov/expapi/verbs/created":     "created",
+        "http://adlnet.gov/expapi/verbs/shared":      "shared",
+        "http://adlnet.gov/expapi/verbs/voided":      "voided"
+    },
+
     /**
     @class TinCan.Verb
     @constructor
     */
-    var Verb = TinCan.Verb = function (cfg) {
+    Verb = TinCan.Verb = function (cfg) {
         this.log("constructor");
 
         /**
@@ -65,7 +90,8 @@ TinCan client library
                 directProps = [
                     "id",
                     "display"
-                ]
+                ],
+                prop
             ;
 
             if (typeof cfg === "string") {
@@ -73,6 +99,15 @@ TinCan client library
                 this.display = {
                     und: this.id
                 };
+
+                //If simple string like "attempted" was passed in (0.9 verbs), 
+                //upconvert the ID to the 0.95 ADL version
+                for (prop in _downConvertMap) {
+                    if (_downConvertMap.hasOwnProperty(prop) && _downConvertMap[prop] === cfg) {
+                        this.id = prop;
+                        break;
+                    }
+                }
             }
             else {
                 cfg = cfg || {};
@@ -82,9 +117,13 @@ TinCan client library
                         this[directProps[i]] = cfg[directProps[i]];
                     }
                 }
-            }
 
-            // TODO: check for acceptable verb list in 0.90
+                if (this.display === null && typeof _downConvertMap[this.id] !== "undefined") {
+                    this.display = {
+                        "und": _downConvertMap[this.id]
+                    };
+                }
+            }
         },
 
         /**
@@ -93,13 +132,17 @@ TinCan client library
         */
         toString: function (lang) {
             this.log("toString");
-            return this.getLangDictionaryValue("display", lang);
+
+            if (this.display !== null) {
+                return this.getLangDictionaryValue("display", lang);
+            }
+
+            return this.id;
         },
 
         /**
         @method asVersion
-        @param {Object} [options]
-        @param {String} [options.version] Version to return (defaults to newest supported)
+        @param {String} [version] Version to return (defaults to newest supported)
         */
         asVersion: function (version) {
             this.log("asVersion");
@@ -107,19 +150,26 @@ TinCan client library
 
             version = version || TinCan.versions()[0];
 
-            if (version === "0.90") {
-                result = this.id;
+            if (version === "0.9") {
+                result = _downConvertMap[this.id];
             }
             else {
                 result = {
-                    id: this.id,
-                    display: this.display
+                    id: this.id
                 };
+                if (this.display !== null) {
+                    result.display = this.display;
+                }
             }
 
             return result;
         },
 
+        /**
+        See {{#crossLink "TinCan.Utils/getLangDictionaryValue"}}{{/crossLink}}
+
+        @method getLangDictionaryValue
+        */
         getLangDictionaryValue: TinCan.Utils.getLangDictionaryValue
     };
 

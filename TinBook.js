@@ -125,7 +125,7 @@ function listBooks(response) {
 		bookElement.addClass('bookElement');			
 		$('body').html(bookElement);
 		$('body').append ($('<span class="instructions">Statement reported to LRS. Refresh this page to start again!</span>'));
-		$('body').append ($('<p><a href="http://beta.projecttincan.com/ClientPrototypes/StatementViewer/" target="_blank">Click here to see the results</a></p>'));
+		$('body').append ($('<p><a href="http://tincanapi.com/statement-viewer/" target="_blank">Click here to see the results</a></p>'));
 	});
 	/*============END DISPLAY SENT DATA==============*/
   });

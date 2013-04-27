@@ -27,15 +27,47 @@ var TinCan;
 
 (function () {
     "use strict";
-    var _environment = null;
+    var _environment = null,
+        _reservedQSParams = {
+            //
+            // these are TC spec reserved words that may end up in queries to the endpoint
+            //
+            statementId:       true,
+            voidedStatementId: true,
+            verb:              true,
+            object:            true,
+            registration:      true,
+            context:           true,
+            actor:             true,
+            since:             true,
+            until:             true,
+            limit:             true,
+            authoritative:     true,
+            sparse:            true,
+            instructor:        true,
+            ascending:         true,
+            continueToken:     true,
+            agent:             true,
+            activityId:        true,
+            stateId:           true,
+            profileId:         true,
+
+            //
+            // these are suggested by the LMS launch spec addition that TinCanJS consumes
+            //
+            activity_platform: true,
+            grouping:          true,
+            "Accept-Language": true
+        };
 
     /**
     @class TinCan
     @constructor
     @param {Object} [options] Configuration used to initialize.
-        @param {Array} [options.recordStores] list of pre-configured LRSes
         @param {String} [options.url] URL for determining launch provided
             configuration options
+        @param {Array} [options.recordStores] list of pre-configured LRSes
+        @param {Object|TinCan.Activity} [options.activity] default activity
     **/
     TinCan = function (cfg) {
         this.log("constructor");
@@ -54,7 +86,7 @@ var TinCan;
 
         /**
         Default actor used when preparing statements that
-        don't yet have an actor set
+        don't yet have an actor set, and for saving state, etc.
 
         @property actor
         @type Object
@@ -96,16 +128,17 @@ var TinCan;
         LOG_SRC: "TinCan",
 
         /**
-        Safe version of logging
+        Safe version of logging, only displays when .DEBUG is true, and console.log
+        is available
 
         @method log
         @param {String} msg Message to output
         */
         log: function (msg, src) {
-            if (TinCan.DEBUG == 1 && console && console.log) {
+            if (TinCan.DEBUG && console && console.log) {
                 src = src || this.LOG_SRC || "TinCan";
 
-                console.log(src + ': ' + msg);
+                console.log("TinCan." + src + ': ' + msg);
             }
         },
 
@@ -115,6 +148,7 @@ var TinCan;
         */
         init: function (cfg) {
             this.log("init");
+            var i;
 
             cfg = cfg || {};
 
@@ -123,10 +157,24 @@ var TinCan;
             if (cfg.hasOwnProperty("url") && cfg.url !== "") {
                 this._initFromQueryString(cfg.url);
             }
+
+            if (cfg.hasOwnProperty("recordStores") && cfg.recordStores !== undefined) {
+                for (i = 0; i < cfg.recordStores.length; i += 1) {
+                    this.addRecordStore(cfg.recordStores[i]);
+                }
+            }
+            if (cfg.hasOwnProperty("activity")) {
+                if (cfg.activity instanceof TinCan.Activity) {
+                    this.activity = cfg.activity;
+                }
+                else {
+                    this.activity = new TinCan.Activity (cfg.activity);
+                }
+            }
         },
 
         /**
-        @method _handleQueryString
+        @method _initFromQueryString
         @param {String} url
         @private
         */
@@ -137,9 +185,10 @@ var TinCan;
                 prop,
                 qsParams = TinCan.Utils.parseURL(url).params,
                 lrsProps = ["endpoint", "auth"],
-                lrsCfg,
+                lrsCfg = {},
                 activityCfg,
-                contextCfg
+                contextCfg,
+                extended = null
             ;
 
             if (qsParams.hasOwnProperty("actor")) {
@@ -159,6 +208,7 @@ var TinCan;
                         id: qsParams.activity_id
                     }
                 );
+                delete qsParams.activity_id;
             }
 
             if (
@@ -172,6 +222,7 @@ var TinCan;
 
                 if (qsParams.hasOwnProperty("activity_platform")) {
                     contextCfg.platform = qsParams.activity_platform;
+                    delete qsParams.activity_platform;
                 }
                 if (qsParams.hasOwnProperty("registration")) {
                     //
@@ -180,9 +231,12 @@ var TinCan;
                     // queries
                     //
                     contextCfg.registration = this.registration = qsParams.registration;
+                    delete qsParams.registration;
                 }
                 if (qsParams.hasOwnProperty("grouping")) {
+                    contextCfg.contextActivities = {};
                     contextCfg.contextActivities.grouping = qsParams.grouping;
+                    delete qsParams.grouping;
                 }
 
                 this.context = new TinCan.Context (contextCfg);
@@ -200,7 +254,22 @@ var TinCan;
                         delete qsParams[prop];
                     }
                 }
-                lrsCfg.extended = qsParams;
+
+                // remove our reserved params so they don't end up  in the extended object
+                for (i in qsParams) {
+                    if (qsParams.hasOwnProperty(i)) {
+                        if (_reservedQSParams.hasOwnProperty(i)) {
+                            delete qsParams[i];
+                        } else {
+                            extended = extended || {};
+                            extended[i] = qsParams[i];
+                        }
+                    }
+                }
+                if (extended !== null) {
+                    lrsCfg.extended = extended;
+                }
+
                 lrsCfg.allowFail = false;
 
                 this.addRecordStore(lrsCfg);
@@ -217,8 +286,13 @@ var TinCan;
         */
         addRecordStore: function (cfg) {
             this.log("addRecordStore");
-
-            var lrs = new TinCan.LRS (cfg);
+            var lrs;
+            if (cfg instanceof TinCan.LRS) {
+                lrs = cfg;
+            }
+            else {
+                lrs = new TinCan.LRS (cfg);
+            }
             this.recordStores.push(lrs);
         },
 
@@ -236,6 +310,9 @@ var TinCan;
 
             if (stmt.actor === null && this.actor !== null) {
                 stmt.actor = this.actor;
+            }
+            if (stmt.target === null && this.activity !== null) {
+                stmt.target = this.activity;
             }
 
             if (this.context !== null) {
@@ -258,6 +335,12 @@ var TinCan;
                             if (this.context.contextActivities.grouping !== null && stmt.context.contextActivities.grouping === null) {
                                 stmt.context.contextActivities.grouping = this.context.contextActivities.grouping;
                             }
+                            if (this.context.contextActivities.parent !== null && stmt.context.contextActivities.parent === null) {
+                                stmt.context.contextActivities.parent = this.context.contextActivities.parent;
+                            }
+                            if (this.context.contextActivities.other !== null && stmt.context.contextActivities.other === null) {
+                                stmt.context.contextActivities.other = this.context.contextActivities.other;
+                            }
                         }
                     }
                 }
@@ -270,23 +353,26 @@ var TinCan;
         Calls saveStatement on each configured LRS, provide callback to make it asynchronous
 
         @method sendStatement
-        @param {TinCan.Statement} Send statement to LRS
-        @param {Function} Callback function to execute on completion
+        @param {TinCan.Statement|Object} statement Send statement to LRS
+        @param {Function} [callback] Callback function to execute on completion
         */
         sendStatement: function (stmt, callback) {
             this.log("sendStatement");
-            var lrs,
-                statement,
-                callbackWrapper,
+
+            // would prefer to use .bind instead of 'self'
+            var self = this,
+                lrs,
+                statement = this.prepareStatement(stmt),
                 rsCount = this.recordStores.length,
                 i,
-                msg
+                msg,
+                results = [],
+                callbackWrapper,
+                callbackResults = []
             ;
 
             if (rsCount > 0) {
-                statement = this.prepareStatement(stmt);
                 /*
-                   when there are multiple LRSes configured and
                    if there is a callback that is a function then we need
                    to wrap that function with a function that becomes
                    the new callback that reduces a closure count of the
@@ -294,30 +380,45 @@ var TinCan;
                    when that number hits zero then the original callback
                    is executed
                 */
-                if (rsCount === 1) {
-                    callbackWrapper = callback;
-                }
-                else {
-                    if (typeof callback === "function") {
-                        callbackWrapper = function () {
-                            this.log("sendStatement - callbackWrapper: " + rsCount);
-                            if (rsCount > 1) {
-                                rsCount -= 1;
-                            }
-                            else if (rsCount === 1) {
-                                callback.apply(this, arguments);
-                            }
-                            else {
-                                this.log("sendStatement - unexpected record store count: " + rsCount);
-                            }
-                        };
-                    }
+                if (typeof callback === "function") {
+                    callbackWrapper = function (err, xhr) {
+                        var args;
+
+                        self.log("sendStatement - callbackWrapper: " + rsCount);
+                        if (rsCount > 1) {
+                            rsCount -= 1;
+                            callbackResults.push(
+                                {
+                                    err: err,
+                                    xhr: xhr
+                                }
+                            );
+                        }
+                        else if (rsCount === 1) {
+                            callbackResults.push(
+                                {
+                                    err: err,
+                                    xhr: xhr
+                                }
+                            );
+                            args = [
+                                callbackResults,
+                                statement
+                            ];
+                            callback.apply(this, args);
+                        }
+                        else {
+                            self.log("sendStatement - unexpected record store count: " + rsCount);
+                        }
+                    };
                 }
 
                 for (i = 0; i < rsCount; i += 1) {
                     lrs = this.recordStores[i];
 
-                    lrs.saveStatement(statement, { callback: callbackWrapper });
+                    results.push(
+                        lrs.saveStatement(statement, { callback: callbackWrapper })
+                    );
                 }
             }
             else {
@@ -328,32 +429,110 @@ var TinCan;
                 else {
                     this.log(msg);
                 }
+                if (typeof callback === "function") {
+                    callback.apply(this, [ null, statement ]);
+                }
             }
+
+            return {
+                statement: statement,
+                results: results
+            };
         },
 
         /**
-        Calls retrieveStatement on each configured LRS until it gets a result, provide callback to make it asynchronous
+        Calls retrieveStatement on the first LRS, provide callback to make it asynchronous
 
         @method getStatement
-        @param {String} Statement ID to get
-        @param {Function} Callback function to execute on completion
-        @return {TinCan.Statement} Retrieved statement from LRS
+        @param {String} statement Statement ID to get
+        @param {Function} [callback] Callback function to execute on completion
+        @return {Array|Result} Array of results, or single result
 
         TODO: make TinCan track statements it has seen in a local cache to be returned easily
         */
         getStatement: function (stmtId, callback) {
             this.log("getStatement");
+
             var lrs,
-                statement,
-                callbackWrapper,
-                rsCount = this.recordStores.length,
-                i,
                 msg
             ;
 
+            if (this.recordStores.length > 0) {
+                //
+                // for statements (for now) we only need to read from the first LRS
+                // in the future it may make sense to get all from all LRSes and
+                // compare to remove duplicates or allow inspection of them for differences?
+                //
+                // TODO: make this the first non-allowFail LRS but for now it should
+                // be good enough to make it the first since we know the LMS provided
+                // LRS is the first
+                //
+                lrs = this.recordStores[0];
+
+                return lrs.retrieveStatement(stmtId, { callback: callback });
+            }
+
+            msg = "[warning] getStatement: No LRSs added yet (statement not retrieved)";
+            if (TinCan.environment().isBrowser) {
+                alert(this.LOG_SRC + ": " + msg);
+            }
+            else {
+                this.log(msg);
+            }
+        },
+
+        /**
+        Creates a statement used for voiding the passed statement/statement ID and calls
+        send statement with the voiding statement.
+
+        @method voidStatement
+        @param {TinCan.Statement|String} statement Statement or statement ID to void
+        @param {Function} [callback] Callback function to execute on completion
+        @param {Object} [options] Options used to build voiding statement
+            @param {TinCan.Agent} [options.actor] Agent to be used as 'actor' in voiding statement
+        */
+        voidStatement: function (stmt, callback, options) {
+            this.log("voidStatement");
+
+            // would prefer to use .bind instead of 'self'
+            var self = this,
+                lrs,
+                actor,
+                voidingStatement,
+                rsCount = this.recordStores.length,
+                i,
+                msg,
+                results = [],
+                callbackWrapper,
+                callbackResults = []
+            ;
+
+            if (stmt instanceof TinCan.Statement) {
+                stmt = stmt.id;
+            }
+
+            if (typeof options.actor !== "undefined") {
+                actor = options.actor;
+            }
+            else if (this.actor !== null) {
+                actor = this.actor;
+            }
+
+            voidingStatement = new TinCan.Statement(
+                {
+                    actor: actor,
+                    verb: {
+                       id: "http://adlnet.gov/expapi/verbs/voided"
+                    },
+                    target: {
+                        objectType: "StatementRef",
+                        id: stmt
+                    }
+                }
+            );
+
             if (rsCount > 0) {
                 /*
-                   when there are multiple LRSes configured and
                    if there is a callback that is a function then we need
                    to wrap that function with a function that becomes
                    the new callback that reduces a closure count of the
@@ -361,45 +540,109 @@ var TinCan;
                    when that number hits zero then the original callback
                    is executed
                 */
-                if (rsCount === 1) {
-                    callbackWrapper = callback;
-                }
-                else {
-                    if (typeof callback === "function") {
-                        callbackWrapper = function () {
-                            this.log("sendStatement - callbackWrapper: " + rsCount);
-                            if (rsCount > 1) {
-                                rsCount -= 1;
-                            }
-                            else if (rsCount === 1) {
-                                callback.apply(this, arguments);
-                            }
-                            else {
-                                this.log("sendStatement - unexpected record store count: " + rsCount);
-                            }
-                        };
-                    }
+                if (typeof callback === "function") {
+                    callbackWrapper = function (err, xhr) {
+                        var args;
+
+                        self.log("voidStatement - callbackWrapper: " + rsCount);
+                        if (rsCount > 1) {
+                            rsCount -= 1;
+                            callbackResults.push(
+                                {
+                                    err: err,
+                                    xhr: xhr
+                                }
+                            );
+                        }
+                        else if (rsCount === 1) {
+                            callbackResults.push(
+                                {
+                                    err: err,
+                                    xhr: xhr
+                                }
+                            );
+                            args = [
+                                callbackResults,
+                                voidingStatement
+                            ];
+                            callback.apply(this, args);
+                        }
+                        else {
+                            self.log("voidStatement - unexpected record store count: " + rsCount);
+                        }
+                    };
                 }
 
                 for (i = 0; i < rsCount; i += 1) {
                     lrs = this.recordStores[i];
 
-                    lrs.retrieveStatement(stmtId, callbackWrapper);
+                    results.push(
+                        lrs.saveStatement(voidingStatement, { callback: callbackWrapper })
+                    );
                 }
             }
             else {
-                msg = "[warning] getStatement: No LRSs added yet (statement not sent)";
+                msg = "[warning] voidStatement: No LRSs added yet (statement not sent)";
                 if (TinCan.environment().isBrowser) {
                     alert(this.LOG_SRC + ": " + msg);
                 }
                 else {
                     this.log(msg);
                 }
+                if (typeof callback === "function") {
+                    callback.apply(this, [ null, voidingStatement ]);
+                }
+            }
+
+            return {
+                statement: voidingStatement,
+                results: results
+            };
+        },
+
+        /**
+        Calls retrieveVoidedStatement on the first LRS, provide callback to make it asynchronous
+
+        @method getVoidedStatement
+        @param {String} statement Statement ID to get
+        @param {Function} [callback] Callback function to execute on completion
+        @return {Array|Result} Array of results, or single result
+
+        TODO: make TinCan track voided statements it has seen in a local cache to be returned easily
+        */
+        getVoidedStatement: function (stmtId, callback) {
+            this.log("getVoidedStatement");
+
+            var lrs,
+                msg
+            ;
+
+            if (this.recordStores.length > 0) {
+                //
+                // for statements (for now) we only need to read from the first LRS
+                // in the future it may make sense to get all from all LRSes and
+                // compare to remove duplicates or allow inspection of them for differences?
+                //
+                // TODO: make this the first non-allowFail LRS but for now it should
+                // be good enough to make it the first since we know the LMS provided
+                // LRS is the first
+                //
+                lrs = this.recordStores[0];
+
+                return lrs.retrieveVoidedStatement(stmtId, { callback: callback });
+            }
+
+            msg = "[warning] getVoidedStatement: No LRSs added yet (statement not retrieved)";
+            if (TinCan.environment().isBrowser) {
+                alert(this.LOG_SRC + ": " + msg);
+            }
+            else {
+                this.log(msg);
             }
         },
 
         /**
-        Calls saveStatements with list of statements
+        Calls saveStatements with list of prepared statements
 
         @method sendStatements
         @param {Array} Array of statements to send
@@ -407,73 +650,105 @@ var TinCan;
         */
         sendStatements: function (stmts, callback) {
             this.log("sendStatements");
-            var lrs,
+            var self = this,
+                lrs,
                 statements = [],
-                callbackWrapper,
                 rsCount = this.recordStores.length,
                 i,
-                msg
+                msg,
+                results = [],
+                callbackWrapper,
+                callbackResults = []
             ;
+            if (stmts.length === 0) {
+                if (typeof callback === "function") {
+                    callback.apply(this, [ null, statements ]);
+                }
+            }
+            else {
+                for (i = 0; i < stmts.length; i += 1) {
+                    statements.push(
+                        this.prepareStatement(stmts[i])
+                    );
+                }
 
-            if (rsCount > 0) {
-                if (stmts.length > 0) {
-                    for (i = 0; i < stmts.length; i += 1) {
-                        statements.push(
-                            this.prepareStatement(stmts[i])
-                        );
-                    }
-
-                    /* when there are multiple LRSes configured and
+                if (rsCount > 0) {
+                    /*
                        if there is a callback that is a function then we need
                        to wrap that function with a function that becomes
                        the new callback that reduces a closure count of the
                        requests that don't have allowFail set to true and
                        when that number hits zero then the original callback
-                       is executed */
-                    if (rsCount === 1) {
-                        callbackWrapper = callback;
-                    }
-                    else {
-                        if (typeof callback === "function") {
-                            callbackWrapper = function () {
-                                this.log("sendStatements - callbackWrapper: " + rsCount);
-                                if (rsCount > 1) {
-                                    rsCount -= 1;
-                                }
-                                else if (rsCount === 1) {
-                                    callback.apply(this, arguments);
-                                }
-                                else {
-                                    this.log("sendStatements - unexpected record store count: " + rsCount);
-                                }
-                            };
-                        }
+                       is executed
+                    */
+
+                    if (typeof callback === "function") {
+                        callbackWrapper = function (err, xhr) {
+                            var args;
+
+                            self.log("sendStatements - callbackWrapper: " + rsCount);
+                            if (rsCount > 1) {
+                                rsCount -= 1;
+                                callbackResults.push(
+                                    {
+                                        err: err,
+                                        xhr: xhr
+                                    }
+                                );
+                            }
+                            else if (rsCount === 1) {
+                                callbackResults.push(
+                                    {
+                                        err: err,
+                                        xhr: xhr
+                                    }
+                                );
+                                args = [
+                                    callbackResults,
+                                    statements
+                                ];
+                                callback.apply(this, args);
+                            }
+                            else {
+                                self.log("sendStatements - unexpected record store count: " + rsCount);
+                            }
+                        };
                     }
 
                     for (i = 0; i < rsCount; i += 1) {
                         lrs = this.recordStores[i];
 
-                        lrs.saveStatements(statements, { callback: callbackWrapper });
+                        results.push(
+                            lrs.saveStatements(statements, { callback: callbackWrapper })
+                        );
+                    }
+                }
+                else {
+                    msg = "[warning] sendStatements: No LRSs added yet (statements not sent)";
+                    if (TinCan.environment().isBrowser) {
+                        alert(this.LOG_SRC + ": " + msg);
+                    }
+                    else {
+                        this.log(msg);
+                    }
+                    if (typeof callback === "function") {
+                        callback.apply(this, [ null, statements ]);
                     }
                 }
             }
-            else {
-                msg = "[warning] sendStatements: No LRSs added yet (statements not sent)";
-                if (TinCan.environment().isBrowser) {
-                    alert(this.LOG_SRC + ": " + msg);
-                }
-                else {
-                    this.log(msg);
-                }
-            }
+
+            return {
+                statements: statements,
+                results: results
+            };
         },
 
         /**
         @method getStatements
         @param {Object} [cfg] Configuration for request
+            @param {Boolean} [cfg.sendActor] Include default actor in query params
+            @param {Boolean} [cfg.sendActivity] Include default activity in query params
             @param {Object} [cfg.params] Parameters used to filter
-                @param {Boolean} [cfg.params.sendActor] Include default actor in query params
-                @param {Boolean} [cfg.params.sendActivity] Include default activity in query params
 
             @param {Function} [cfg.callback] Function to run at completion
 
@@ -504,17 +779,24 @@ var TinCan;
                 params = cfg.params || {};
 
                 if (cfg.sendActor && this.actor !== null) {
-                    params.actor = this.actor;
+                    if (lrs.version === "0.9" || lrs.version === "0.95") {
+                        params.actor = this.actor;
+                    }
+                    else {
+                        params.agent = this.actor;
+                    }
                 }
                 if (cfg.sendActivity && this.activity !== null) {
-                    params.activity = this.activity;
+                    if (lrs.version === "0.9" || lrs.version === "0.95") {
+                        params.target = this.activity;
+                    }
+                    else {
+                        params.activity = this.activity;
+                    }
                 }
-                if (this.registration !== null) {
+                if (typeof params.registration === "undefined" && this.registration !== null) {
                     params.registration = this.registration;
                 }
-
-                // TODO: do we want to hard set this?
-                params.sparse = cfg.sparse || "false";
 
                 queryCfg = {
                     params: params
@@ -539,7 +821,7 @@ var TinCan;
         @method getState
         @param {String} key Key to retrieve from the state
         @param {Object} [cfg] Configuration for request
-            @param {Object} [cfg.actor] Actor used in query,
+            @param {Object} [cfg.agent] Agent used in query,
                 defaults to 'actor' property if empty
             @param {Object} [cfg.activity] Activity used in query,
                 defaults to 'activity' property if empty
@@ -568,7 +850,7 @@ var TinCan;
                 cfg = cfg || {};
 
                 queryCfg = {
-                    actor: (typeof cfg.actor !== "undefined" ? cfg.actor : this.actor),
+                    agent: (typeof cfg.agent !== "undefined" ? cfg.agent : this.actor),
                     activity: (typeof cfg.activity !== "undefined" ? cfg.activity : this.activity)
                 };
                 if (typeof cfg.registration !== "undefined") {
@@ -598,12 +880,13 @@ var TinCan;
         @param {String} key Key to store into the state
         @param {String|Object} val Value to store into the state, objects will be stringified to JSON
         @param {Object} [cfg] Configuration for request
-            @param {Object} [cfg.actor] Actor used in query,
+            @param {Object} [cfg.agent] Agent used in query,
                 defaults to 'actor' property if empty
             @param {Object} [cfg.activity] Activity used in query,
                 defaults to 'activity' property if empty
             @param {Object} [cfg.registration] Registration used in query,
                 defaults to 'registration' property if empty
+            @param {String} [cfg.lastSHA1] SHA1 of the previously seen existing state
             @param {Function} [cfg.callback] Function to run with state
         */
         setState: function (key, val, cfg) {
@@ -627,7 +910,7 @@ var TinCan;
                 cfg = cfg || {};
 
                 queryCfg = {
-                    actor: (typeof cfg.actor !== "undefined" ? cfg.actor : this.actor),
+                    agent: (typeof cfg.agent !== "undefined" ? cfg.agent : this.actor),
                     activity: (typeof cfg.activity !== "undefined" ? cfg.activity : this.activity)
                 };
                 if (typeof cfg.registration !== "undefined") {
@@ -635,6 +918,9 @@ var TinCan;
                 }
                 else if (this.registration !== null) {
                     queryCfg.registration = this.registration;
+                }
+                if (typeof cfg.lastSHA1 !== "undefined") {
+                    queryCfg.lastSHA1 = cfg.lastSHA1;
                 }
                 if (typeof cfg.callback !== "undefined") {
                     queryCfg.callback = cfg.callback;
@@ -656,7 +942,7 @@ var TinCan;
         @method deleteState
         @param {String|null} key Key to remove from the state, or null to clear all
         @param {Object} [cfg] Configuration for request
-            @param {Object} [cfg.actor] Actor used in query,
+            @param {Object} [cfg.agent] Agent used in query,
                 defaults to 'actor' property if empty
             @param {Object} [cfg.activity] Activity used in query,
                 defaults to 'activity' property if empty
@@ -685,7 +971,7 @@ var TinCan;
                 cfg = cfg || {};
 
                 queryCfg = {
-                    actor: (typeof cfg.actor !== "undefined" ? cfg.actor : this.actor),
+                    agent: (typeof cfg.agent !== "undefined" ? cfg.agent : this.actor),
                     activity: (typeof cfg.activity !== "undefined" ? cfg.activity : this.activity)
                 };
                 if (typeof cfg.registration !== "undefined") {
@@ -764,6 +1050,7 @@ var TinCan;
         @param {Object} [cfg] Configuration for request
             @param {Object} [cfg.activity] Activity used in query,
                 defaults to 'activity' property if empty
+            @param {String} [cfg.lastSHA1] SHA1 of the previously seen existing profile
             @param {Function} [cfg.callback] Function to run with activity profile
         */
         setActivityProfile: function (key, val, cfg) {
@@ -791,6 +1078,9 @@ var TinCan;
                 };
                 if (typeof cfg.callback !== "undefined") {
                     queryCfg.callback = cfg.callback;
+                }
+                if (typeof cfg.lastSHA1 !== "undefined") {
+                    queryCfg.lastSHA1 = cfg.lastSHA1;
                 }
 
                 return lrs.saveActivityProfile(key, val, queryCfg);
@@ -888,8 +1178,9 @@ var TinCan;
     TinCan.versions = function () {
         // newest first so we can use the first as the default
         return [
+            "1.0.0",
             "0.95",
-            "0.90"
+            "0.9"
         ];
     };
 
@@ -903,9 +1194,15 @@ var TinCan;
             _environment = {};
             if (typeof window !== "undefined") {
                 _environment.isBrowser = true;
-                _environment.isIE = false;
-                if (typeof XDomainRequest !== "undefined") {
-                    _environment.isIE = true;
+                _environment.hasCORS = false;
+                _environment.useXDR = false;
+
+                if (typeof (new XMLHttpRequest()).withCredentials !== "undefined") {
+                    _environment.hasCORS = true;
+                }
+                else if (typeof XDomainRequest !== "undefined") {
+                    _environment.hasCORS = true;
+                    _environment.useXDR = true;
                 }
             }
             else {
@@ -916,7 +1213,7 @@ var TinCan;
         return _environment;
     };
 
-    // Make sure we have JSON in general
+    // Shims for browsers not supporting our needs, mainly IE
     if (TinCan.environment().isBrowser) {
         /*
          * Make JSON safe for IE6
@@ -950,6 +1247,16 @@ var TinCan;
                     }
                     return typeof vContent === "string" ? "\"" + vContent.replace(/"/g, "\\$&") + "\"" : String(vContent);
                 }
+            };
+        }
+
+        /*
+         * Make Date.now safe for IE < 9
+         * https://developer.mozilla.org/en-US/docs/JavaScript/Reference/Global_Objects/Date/now
+        */
+        if (!Date.now) {
+            Date.now = function () {
+                return +(new Date ());
             };
         }
     }
