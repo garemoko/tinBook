@@ -45,7 +45,7 @@ TinCan client library
 
         /**
         @property definition
-        @type Object
+        @type TinCan.ActivityDefinition
         */
         this.definition = null;
 
@@ -78,8 +78,11 @@ TinCan client library
             cfg = cfg || {};
 
             if (cfg.hasOwnProperty("definition")) {
-                // TODO: check to see if already this type
-                this.definition = new TinCan.ActivityDefinition (cfg.definition);
+                if (cfg.definition instanceof TinCan.ActivityDefinition) {
+                    this.definition = cfg.definition;
+                } else {
+                    this.definition = new TinCan.ActivityDefinition (cfg.definition);
+                }
             }
 
             for (i = 0; i < directProps.length; i += 1) {
@@ -98,7 +101,7 @@ TinCan client library
             var defString = "";
 
             if (this.definition !== null) {
-                defString = this.definition.toString();
+                defString = this.definition.toString(lang);
                 if (defString !== "") {
                     return defString;
                 }
@@ -108,13 +111,12 @@ TinCan client library
                 return this.id;
             }
 
-            return "";
+            return "Activity: unidentified";
         },
 
         /**
         @method asVersion
-        @param {Object} [options]
-        @param {String} [options.version] Version to return (defaults to newest supported)
+        @param {String} [version] Version to return (defaults to newest supported)
         */
         asVersion: function (version) {
             this.log("asVersion");

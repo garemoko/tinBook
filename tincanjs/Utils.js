@@ -23,13 +23,18 @@ TinCan client library
 (function () {
     "use strict";
 
+    /**
+    @class TinCan.Utils
+    */
     TinCan.Utils = {
         /**
+        Generates a UUIDv4 compliant string that should be reasonably unique
+
         @method getUUID
         @return {String} UUID
         @static
 
-        Excerpt from: Math.uuid.js (v1.4)
+        Excerpt from: http://www.broofa.com/Tools/Math.uuid.js (v1.4)
         http://www.broofa.com
         mailto:robert@broofa.com
         Copyright (c) 2010 Robert Kieffer
@@ -47,13 +52,75 @@ TinCan client library
         },
 
         /**
+        @method getISODateString
+        @static
+        @param {Date} date Date to stringify
+        @return {String} ISO date String
+        */
+        getISODateString: function (d) {
+            function pad (val, n) {
+                var padder,
+                    tempVal;
+                if (typeof val === "undefined" || val === null) {
+                    val = 0;
+                }
+                if (typeof n === "undefined" || n === null) {
+                    n = 2;
+                }
+                padder = Math.pow(10, n-1);
+                tempVal = val.toString();
+
+                while (val < padder && padder > 1) {
+                    tempVal = '0' + tempVal;
+                    padder = padder / 10;
+                }
+
+                return tempVal;
+            }
+
+            return d.getUTCFullYear() + '-'
+                + pad(d.getUTCMonth() + 1) + '-'
+                + pad(d.getUTCDate()) + 'T'
+                + pad(d.getUTCHours()) + ':'
+                + pad(d.getUTCMinutes()) + ':'
+                + pad(d.getUTCSeconds()) + '.'
+                + pad(d.getUTCMilliseconds(), 3) + 'Z';
+        },
+
+        /**
+        @method getSHA1String
+        @static
+        @param {String} str Content to hash
+        @return {String} SHA1 for contents
+        */
+        getSHA1String: function (str) {
+            /*global CryptoJS*/
+
+            return CryptoJS.SHA1(str).toString(CryptoJS.enc.Hex);
+        },
+
+        /**
+        @method getBase64String
+        @static
+        @param {String} str Content to encode
+        @return {String} Base64 encoded contents
+        */
+        getBase64String: function (str) {
+            /*global CryptoJS*/
+
+            return CryptoJS.enc.Base64.stringify(
+                CryptoJS.enc.Latin1.parse(str)
+            );
+        },
+
+        /**
+        Intended to be inherited by objects with properties that store
+        display values in a language based "dictionary"
+
         @method getLangDictionaryValue
         @param {String} prop Property name storing the dictionary
         @param {String} [lang] Language to return
         @return {String}
-
-        Intended to be inherited by objects with properties that store
-        display values in a language based "dictionary"
         */
         getLangDictionaryValue: function (prop, lang) {
             var langDict = this[prop],
@@ -69,7 +136,9 @@ TinCan client library
                 return langDict["en-US"];
             }
             for (key in langDict) {
-                return langDict[key];
+                if (langDict.hasOwnProperty(key)) {
+                    return langDict[key];
+                }
             }
 
             return "";
@@ -102,6 +171,17 @@ TinCan client library
                 path: parts[0],
                 params: params
             };
+        },
+
+        /**
+        @method getServerRoot
+        @param {String} absoluteUrl
+        @return {String} server root of url
+        @private
+        */
+        getServerRoot: function (absoluteUrl) {
+            var urlParts = absoluteUrl.split("/");
+            return urlParts[0] + "//" + urlParts[2];
         }
     };
 }());
