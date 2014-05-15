@@ -24,7 +24,7 @@ myTinCan.enableDebug = 1;
 //Create an LRS and add to the list of record stores
 var myLRS = new TinCan.LRS({
 	endpoint:"https://cloud.scorm.com/ScormEngineInterface/TCAPI/public/", 
-	version: "0.95",
+	version: "1.0.0",
 	auth: 'Basic ' + Base64.encode("<account id>" + ':' + "<password>")
 });
 myTinCan.recordStores[0] = myLRS;
